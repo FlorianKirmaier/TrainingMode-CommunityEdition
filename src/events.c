@@ -1460,10 +1460,11 @@ void OnFileLoad(HSD_Archive *archive) // this function is run right after TmDt i
     *event_vars_ptr_loc = &stc_event_vars;
 }
 
-// AI-written (Claude): with a fresh auto-load recording (autoload.h) the event select picks the Lab by itself, once per boot
-#define AUTOLOAD_ESS_DELAY_FRAMES 20
-#define EVENT_MAJOR 0x2B
-#define EVENT_SELECT_MINOR 0
+// AI-written (Claude): with a fresh auto-load recording (autoload.h) the event select picks the Lab by itself, on the
+// first main menu after boot only
+#define AUTOLOAD_ESS_DELAY_FRAMES 60
+#define MAIN_MENU_MAJOR 1 // TM-CE boots into the main menu's event select
+#define MAIN_MENU_MINOR 0
 #define LAB_PAGE 1
 #define LAB_EVENT 0
 #define AUTOLOAD_ESS_TRIES 5
@@ -1508,7 +1509,7 @@ static void Autoload_OnSceneChange(void)
     int major = Scene_GetCurrentMajor();
     int minor = Scene_GetCurrentMinor();
     OSReport("autoload: scene %d/%d, page %d event %d\n", major, minor, stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
-    if (autoload_ess_done || major != EVENT_MAJOR || minor != EVENT_SELECT_MINOR)
+    if (autoload_ess_done || major != MAIN_MENU_MAJOR || minor != MAIN_MENU_MINOR)
         return;
     autoload_ess_done = 1;
     if (stc_memcard->TM_EventPage != LAB_PAGE || stc_memcard->EventBackup.event != LAB_EVENT)
