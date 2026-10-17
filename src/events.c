@@ -1460,57 +1460,29 @@ void OnFileLoad(HSD_Archive *archive) // this function is run right after TmDt i
     *event_vars_ptr_loc = &stc_event_vars;
 }
 
-// AI-written (Claude): with a fresh auto-load recording (autoload.h) the event select picks the Lab by itself, on the
-// first main menu after boot only
-#define AUTOLOAD_ESS_DELAY_FRAMES 60
-#define MAIN_MENU_MAJOR 1 // TM-CE boots into the main menu's event select
-#define MAIN_MENU_MINOR 0
+// AI-written (Claude): with a fresh auto-load recording (autoload.h) the game boots straight into the Lab instead of
+// the main menu; OnBoot runs right after the boot scene has chosen what comes next.
+#define EVENT_MAJOR 0x2B
 #define LAB_PAGE 1
 #define LAB_EVENT 0
-static int autoload_ess_done;
-
 #define MEMCARD_BUSY 11
-#define AUTOLOAD_ESS_GIVE_UP_FRAMES 180
-#define EVENT_MAJOR 0x2B
 
-// Waits until the game is done with the memory card, looks for a fresh recording and then leaves the main menu for
-// the event the event select is on (the Lab), as choosing it there does.
-static void Autoload_EssThink(GOBJ *gobj)
+static void Autoload_OnBoot(void)
 {
-    int *frames = gobj->userdata;
-    int frame = ++*frames;
-    if (frame < AUTOLOAD_ESS_DELAY_FRAMES)
-        return;
     int status = Memcard_CheckStatus();
-    if (status == MEMCARD_BUSY && frame < AUTOLOAD_ESS_GIVE_UP_FRAMES)
-        return;
-    GObj_Destroy(gobj);
-    OSReport("autoload: main menu frame %d, memcard status %d\n", frame, status);
+    OSReport("autoload: boot, memcard status %d, next major %d, last port %d\n", status, stc_scene_info->major_next,
+        stc_memcard->EventBackup.port);
     if (status == MEMCARD_BUSY || (Autoload_Find(0) == -1 && Autoload_Find(1) == -1))
         return;
-    OSReport("autoload: starting the event, page %d event %d\n", stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
+    stc_memcard->TM_EventPage = LAB_PAGE;
+    stc_memcard->EventBackup.event = LAB_EVENT;
     Scene_SetNextMajor(EVENT_MAJOR);
-    Scene_ExitMajor();
-    Scene_ExitMinor();
 }
 
 static void Autoload_OnSceneChange(void)
 {
-    int major = Scene_GetCurrentMajor();
-    int minor = Scene_GetCurrentMinor();
-    OSReport("autoload: scene %d/%d, page %d event %d\n", major, minor, stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
-    if (autoload_ess_done || major != MAIN_MENU_MAJOR || minor != MAIN_MENU_MINOR)
-        return;
-    autoload_ess_done = 1;
-    if (stc_memcard->TM_EventPage != LAB_PAGE || stc_memcard->EventBackup.event != LAB_EVENT)
-    {
-        OSReport("autoload: the event select is not on the Lab, leaving it to the player\n");
-        return;
-    }
-    GOBJ *gobj = GObj_Create(0, 0, 0);
-    int *frames = calloc(sizeof(int));
-    GObj_AddUserData(gobj, 4, HSD_Free, frames);
-    GObj_AddProc(gobj, Autoload_EssThink, 0);
+    OSReport("autoload: scene %d/%d, page %d event %d\n", Scene_GetCurrentMajor(), Scene_GetCurrentMinor(),
+        stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
 }
 
 void OnSceneChange(void)
@@ -1526,7 +1498,7 @@ void OnSceneChange(void)
 
 void OnBoot(void)
 {
-    // OSReport("hi this is boot\n");
+    Autoload_OnBoot();
 };
 
 void OnStartMelee(void)

@@ -161,9 +161,15 @@ void Autoload_Think(GOBJ *gobj)
             autoload_slot = slot;
         }
         if (autoload_file_no == -1)
+        {
             GObj_Destroy(gobj);
-        else
-            import_data.menu_gobj = Menu_Create();
+            return;
+        }
+        // booted straight here, nobody chose the event: the controller is the one used last time
+        OSReport("autoload: css ports hmn %d cpu %d, last port %d\n", *stc_css_hmnport, *stc_css_cpuport, stc_memcard->EventBackup.port);
+        if (stc_memcard->EventBackup.port < 4)
+            *stc_css_hmnport = stc_memcard->EventBackup.port;
+        import_data.menu_gobj = Menu_Create();
         return;
     }
 
