@@ -17,11 +17,19 @@ static int Autoload_Find(int slot)
 {
     s32 memSize, sectorSize;
     int file_no = -1;
-    if (CARDProbeEx(slot, &memSize, &sectorSize) != CARD_RESULT_READY)
+    int result = CARDProbeEx(slot, &memSize, &sectorSize);
+    if (result != CARD_RESULT_READY)
+    {
+        OSReport("autoload: slot %d probe %d\n", slot, result);
         return -1;
+    }
     stc_memcard_work->is_done = 0;
-    if (CARDMountAsync(slot, stc_memcard_work->work_area, 0, Memcard_RemovedCallback) != CARD_RESULT_READY)
+    result = CARDMountAsync(slot, stc_memcard_work->work_area, 0, Memcard_RemovedCallback);
+    if (result != CARD_RESULT_READY)
+    {
+        OSReport("autoload: slot %d mount %d\n", slot, result);
         return -1;
+    }
     Autoload_WaitCard();
 
     u32 ticks_per_second = os_info->bus_clock / 4;
