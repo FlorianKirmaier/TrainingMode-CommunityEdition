@@ -5,6 +5,8 @@ Copies a TM-CE ISO and appends Slippi's "Slippi Recording" codes, taken from an 
 The game ID stays GTME01, so the Slippi Dolphin loads none of its own codes for it; nothing of Slippi's is copied into
 this repository and a newer Slippi Dolphin only needs this script run again.
 
+GC_FST overrides the gc_fst binary (bin/ by default).
+
 Usage: add-recording.py [--skip <part of a code's name>]... <TM-CE.iso> <output.iso> [<Slippi Dolphin Sys folder>]
 """
 import os
@@ -83,10 +85,26 @@ def empty_list():
 
 
 def gc_fst():
+    if os.environ.get("GC_FST"):
+        return os.environ["GC_FST"]
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin")
     name = "gc_fst_macos_arm64" if platform.system() == "Darwin" and platform.machine() == "arm64" else \
         "gc_fst.exe" if platform.system() == "Windows" else "gc_fst"
     return os.path.join(root, name)
+
+
+def overlapping_files(iso):
+    """Files whose contents overlap; older gc_fst builds can place an inserted file over another one."""
+    tree = subprocess.run([gc_fst(), "tree", iso, "-s", "-o", "-x"], check=True, capture_output=True, text=True).stdout
+    files = sorted((int(p[1], 16), int(p[2], 16), p[0].strip()) for p in (l.split("\t") for l in tree.splitlines())
+                   if len(p) >= 3 and p[1].startswith("0x"))
+    out, end, owner = [], 0, None
+    for start, size, name in files:
+        if size and start < end:
+            out.append((owner, name))
+        if start + size > end:
+            end, owner = start + size, name
+    return out
 
 
 def main():
@@ -123,6 +141,10 @@ def main():
     shutil.copyfile(iso, out)
     subprocess.run([gc_fst(), "fs", out, "insert", "codes.gct", gct], check=True)
     shutil.rmtree(tmp)
+    overlaps = overlapping_files(out)
+    if overlaps:
+        os.remove(out)
+        sys.exit(f"gc_fst placed files over each other, {out} removed: {overlaps}")
     print(f"{out}: {len(added)} Slippi codes added ({sum(len(c[2]) for c in added) * 8} bytes)")
 
 
