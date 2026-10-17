@@ -1,4 +1,5 @@
 #include "lab_common.h"
+#include "autoload.h"
 #include <stddef.h>
 
 // Static Variables
@@ -10,10 +11,7 @@ static GXColor text_gold = {255, 211, 0, 255};
 
 static EventDesc *event_desc;
 
-// AI-written (Claude): a recording named TMREC_AUTO_… that is at most AUTOLOAD_SECONDS old loads as soon as the Lab CSS
-// opens, so a tool that writes one and starts Dolphin needs no menus
-#define AUTOLOAD_PREFIX "TMREC_AUTO_"
-#define AUTOLOAD_SECONDS 120
+// AI-written (Claude): auto-load, see autoload.h
 #define AUTOLOAD_DELAY_FRAMES 30
 static int autoload_frames;
 static int autoload_slot;
@@ -149,42 +147,6 @@ void Read_Recordings()
             stc_memcard_work->is_done = 0;
         }
     }
-}
-
-// Finds the newest fresh TMREC_AUTO_ recording on a card.
-static int Autoload_Find(int slot)
-{
-    s32 memSize, sectorSize;
-    int file_no = -1;
-    if (CARDProbeEx(slot, &memSize, &sectorSize) != CARD_RESULT_READY)
-        return -1;
-    stc_memcard_work->is_done = 0;
-    if (CARDMountAsync(slot, stc_memcard_work->work_area, 0, Memcard_RemovedCallback) != CARD_RESULT_READY)
-        return -1;
-    Memcard_Wait();
-
-    u32 ticks_per_second = os_info->bus_clock / 4;
-    u64 now = OSGetTime();
-    u32 newest = 0;
-    CARDStat card_stat;
-    for (int i = 0; i < CARD_MAX_FILE; i++)
-    {
-        if (CARDGetStatus(slot, i, &card_stat) != CARD_RESULT_READY)
-            continue;
-        if (strncmp(os_info->company, (char *)card_stat.company, sizeof(os_info->company)) != 0 ||
-                strncmp(os_info->gameName, (char *)card_stat.gameName, sizeof(os_info->gameName)) != 0 ||
-                strncmp(AUTOLOAD_PREFIX, card_stat.fileName, sizeof(AUTOLOAD_PREFIX) - 1) != 0)
-            continue;
-        u64 written = (u64)card_stat.time * ticks_per_second;
-        if (written > now || now - written > (u64)AUTOLOAD_SECONDS * ticks_per_second || card_stat.time < newest)
-            continue;
-        newest = card_stat.time;
-        file_no = i;
-    }
-
-    CARDUnmount(slot);
-    stc_memcard_work->is_done = 0;
-    return file_no;
 }
 
 // Goes through the import menu as a player would: open it, pick the card and select the file; the player confirms
@@ -1333,6 +1295,8 @@ void Import_Start(ExportHeader *header, int slot, int file_no)
 
     // load files
     Preload_Update();
+    OSReport("import: hmn %d/%d cpu %d/%d stage %d, ports hmn %d cpu %d\n", hmn_kind, hmn_costume, cpu_kind, cpu_costume, stage_kind,
+        *stc_css_hmnport, *stc_css_cpuport);
 
     // advance scene
     *stc_css_exitkind = 1;

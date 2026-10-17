@@ -1,6 +1,7 @@
 #include "events.h"
 #include "savestate.h"
 #include "osds.h"
+#include "autoload.h"
 #include <stdarg.h>
 
 /////////////////////
@@ -1225,6 +1226,8 @@ void EventInit(int page, int eventID, MatchInit *matchData)
             matchData->playerData[1].portNumberOverride = cpu_port;
         }
         
+        OSReport("event init: cpu %d/%d preload hmn %d cpu %d, ports hmn %d cpu %d\n", cpu_kind, cpu_costume,
+            preload->queued.fighters[0].kind, preload->queued.fighters[1].kind, hmn_port, cpu_port);
         matchData->playerData[0].c_kind = preload->queued.fighters[0].kind;
         matchData->playerData[0].costume = preload->queued.fighters[0].costume;
         matchData->playerData[0].p_kind = PKIND_HMN;
@@ -1457,6 +1460,53 @@ void OnFileLoad(HSD_Archive *archive) // this function is run right after TmDt i
     *event_vars_ptr_loc = &stc_event_vars;
 }
 
+// AI-written (Claude): with a fresh auto-load recording (autoload.h) the event select picks the Lab by itself, once per boot
+#define AUTOLOAD_ESS_DELAY_FRAMES 20
+#define EVENT_MAJOR 0x2B
+#define EVENT_SELECT_MINOR 0
+#define LAB_PAGE 1
+#define LAB_EVENT 0
+#define AUTOLOAD_ESS_TRIES 5
+#define COMBINED_PAD_DOWN ((u32 *)(0x80479cf0 + 0xC))
+static int autoload_ess_done;
+
+static void Autoload_EssThink(GOBJ *gobj)
+{
+    int *frames = gobj->userdata;
+    (*frames)++;
+    if (*frames < AUTOLOAD_ESS_DELAY_FRAMES)
+        return;
+    if (*frames >= AUTOLOAD_ESS_DELAY_FRAMES + AUTOLOAD_ESS_TRIES)
+    {
+        GObj_Destroy(gobj);
+        return;
+    }
+    OSReport("autoload: ESS press A (try %d), page %d event %d\n", *frames - AUTOLOAD_ESS_DELAY_FRAMES,
+        stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
+    *COMBINED_PAD_DOWN |= HSD_BUTTON_A;
+}
+
+static void Autoload_OnSceneChange(void)
+{
+    int major = Scene_GetCurrentMajor();
+    int minor = Scene_GetCurrentMinor();
+    OSReport("autoload: scene %d/%d, page %d event %d\n", major, minor, stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
+    if (autoload_ess_done || major != EVENT_MAJOR || minor != EVENT_SELECT_MINOR)
+        return;
+    autoload_ess_done = 1;
+    if (Autoload_Find(0) == -1 && Autoload_Find(1) == -1)
+        return;
+    if (stc_memcard->TM_EventPage != LAB_PAGE || stc_memcard->EventBackup.event != LAB_EVENT)
+    {
+        OSReport("autoload: the event select is not on the Lab, leaving it to the player\n");
+        return;
+    }
+    GOBJ *gobj = GObj_Create(0, 0, 0);
+    int *frames = calloc(sizeof(int));
+    GObj_AddUserData(gobj, 4, HSD_Free, frames);
+    GObj_AddProc(gobj, Autoload_EssThink, 0);
+}
+
 void OnSceneChange(void)
 {
     // Hook exists at 801a4c94
@@ -1465,6 +1515,7 @@ void OnSceneChange(void)
 #if TM_DEBUG
     TM_CreateConsole();
 #endif
+    Autoload_OnSceneChange();
 };
 
 void OnBoot(void)
