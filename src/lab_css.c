@@ -222,6 +222,10 @@ void Autoload_Think(GOBJ *gobj)
         *stc_css_exitkind = 5;
     else if (autoload_frames == AUTOLOAD_DELAY_FRAMES)
     {
+        // the CSS sets the CPU's port once the player has picked a fighter, which has not happened yet
+        if (*stc_css_hmnport < 0 || *stc_css_hmnport > 3)
+            *stc_css_hmnport = 0;
+        *stc_css_cpuport = (*stc_css_hmnport + 1) % 4;
         Import_Start(&autoload_header, autoload_slot, autoload_file_no);
         SFX_PlayCommon(1);
     }
