@@ -165,10 +165,15 @@ void Autoload_Think(GOBJ *gobj)
             GObj_Destroy(gobj);
             return;
         }
-        // booted straight here, nobody chose the event: the controller is the one used last time
-        OSReport("autoload: css ports hmn %d cpu %d, last port %d\n", *stc_css_hmnport, *stc_css_cpuport, stc_memcard->EventBackup.port);
-        if (stc_memcard->EventBackup.port < 4)
-            *stc_css_hmnport = stc_memcard->EventBackup.port;
+        // booted straight here, nobody chose the event: the player is on the last used port if a controller is
+        // plugged in there, else on the first port with one
+        int port = stc_memcard->EventBackup.port;
+        if (port > 3 || stc_master_pads->pad[port].error != PAD_ERR_NONE)
+            for (port = 0; port < 3 && stc_master_pads->pad[port].error != PAD_ERR_NONE; port++);
+        OSReport("autoload: css ports hmn %d cpu %d, last port %d, plugged %d%d%d%d, using %d\n", *stc_css_hmnport, *stc_css_cpuport,
+            stc_memcard->EventBackup.port, stc_master_pads->pad[0].error, stc_master_pads->pad[1].error,
+            stc_master_pads->pad[2].error, stc_master_pads->pad[3].error, port);
+        *stc_css_hmnport = port;
         import_data.menu_gobj = Menu_Create();
         return;
     }
