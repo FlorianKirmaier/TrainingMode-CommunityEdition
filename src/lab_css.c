@@ -18,7 +18,6 @@ static EventDesc *event_desc;
 static int autoload_frames;
 static int autoload_slot;
 static int autoload_file_no;
-static ExportHeader autoload_header;
 
 ExportHeader *GetExportHeaderFromCard(int slot, char *fileName, void *buffer);
 int CSS_ID(int ext_id);
@@ -152,7 +151,7 @@ void Read_Recordings()
     }
 }
 
-// Finds the newest fresh TMREC_AUTO_ recording on a card; its header is copied to autoload_header.
+// Finds the newest fresh TMREC_AUTO_ recording on a card.
 static int Autoload_Find(int slot)
 {
     s32 memSize, sectorSize;
@@ -168,7 +167,6 @@ static int Autoload_Find(int slot)
     u64 now = OSGetTime();
     u32 newest = 0;
     CARDStat card_stat;
-    char name[CARD_FILENAME_MAX];
     for (int i = 0; i < CARD_MAX_FILE; i++)
     {
         if (CARDGetStatus(slot, i, &card_stat) != CARD_RESULT_READY)
@@ -182,18 +180,6 @@ static int Autoload_Find(int slot)
             continue;
         newest = card_stat.time;
         file_no = i;
-        memcpy(name, card_stat.fileName, sizeof(name));
-    }
-
-    if (file_no != -1)
-    {
-        void *buffer = calloc(CARD_READ_SIZE);
-        ExportHeader *header = GetExportHeaderFromCard(slot, name, buffer);
-        if (header)
-            memcpy(&autoload_header, header, sizeof(autoload_header));
-        else
-            file_no = -1;
-        HSD_Free(buffer);
     }
 
     CARDUnmount(slot);
@@ -201,9 +187,9 @@ static int Autoload_Find(int slot)
     return file_no;
 }
 
+// Goes through the import menu as a player would: open it, pick the card, select the file, confirm.
 void Autoload_Think(GOBJ *gobj)
 {
-    // first frame: look for a recording; while one is pending the CSS is held, as the import menu holds it
     if (autoload_frames++ == 0)
     {
         for (int slot = 0; slot < 2 && autoload_file_no == -1; slot++)
@@ -212,21 +198,46 @@ void Autoload_Think(GOBJ *gobj)
             autoload_slot = slot;
         }
         if (autoload_file_no == -1)
-        {
             GObj_Destroy(gobj);
+        else
+            import_data.menu_gobj = Menu_Create();
+        return;
+    }
+
+    GOBJ *menu = import_data.menu_gobj;
+    if (menu == 0)
+    {
+        GObj_Destroy(gobj); // the player closed the menu
+        return;
+    }
+
+    if (autoload_frames == AUTOLOAD_DELAY_FRAMES && import_data.menu_state == IMP_SELCARD)
+    {
+        import_data.cursor = autoload_slot;
+        import_data.memcard_slot = autoload_slot;
+        SFX_PlayCommon(1);
+        Menu_SelCard_Exit(menu);
+        Menu_SelFile_Init(menu);
+        for (int i = 0; i < import_data.file_num && import_data.menu_state == IMP_SELFILE; i++)
+        {
+            if (import_data.file_info[i].file_no != autoload_file_no)
+                continue;
+            int page = i / IMPORT_FILESPERPAGE;
+            if (page != import_data.page)
+            {
+                import_data.page = page;
+                Menu_SelFile_LoadPage(menu, page);
+            }
+            import_data.cursor = i % IMPORT_FILESPERPAGE;
             return;
         }
+        GObj_Destroy(gobj); // not in the list: leave the menu to the player
     }
-    *stc_css_delay = 2;
-    if (autoload_frames < AUTOLOAD_DELAY_FRAMES)
-        *stc_css_exitkind = 5;
-    else if (autoload_frames == AUTOLOAD_DELAY_FRAMES)
+    else if (autoload_frames >= AUTOLOAD_DELAY_FRAMES * 2 && import_data.menu_state == IMP_SELFILE && !import_data.snap.load_inprogress)
     {
-        // the CSS sets the CPU's port once the player has picked a fighter, which has not happened yet
-        if (*stc_css_hmnport < 0 || *stc_css_hmnport > 3)
-            *stc_css_hmnport = 0;
-        *stc_css_cpuport = (*stc_css_hmnport + 1) % 4;
-        Import_Start(&autoload_header, autoload_slot, autoload_file_no);
+        Menu_Confirm_Init(menu, CFRM_LOAD);
+        GObj_Destroy(gobj);
+        Import_Start(&import_data.header[import_data.cursor], import_data.memcard_slot, autoload_file_no);
         SFX_PlayCommon(1);
     }
 }
