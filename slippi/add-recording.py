@@ -5,7 +5,7 @@ Copies a TM-CE ISO and appends Slippi's "Slippi Recording" codes, taken from an 
 The game ID stays GTME01, so the Slippi Dolphin loads none of its own codes for it; nothing of Slippi's is copied into
 this repository and a newer Slippi Dolphin only needs this script run again.
 
-Usage: add-recording.py <TM-CE.iso> <output.iso> [<Slippi Dolphin Sys folder>]
+Usage: add-recording.py [--skip <part of a code's name>]... <TM-CE.iso> <output.iso> [<Slippi Dolphin Sys folder>]
 """
 import os
 import platform
@@ -53,7 +53,7 @@ def written(code):
     return (addr, addr + (ws[0][1] if t == 0x06 else 4))
 
 
-def recording_codes(ini):
+def recording_codes(ini, skip=()):
     lines = open(ini).read().splitlines()
     gecko = lines.index("[Gecko]")
     start = next(i for i, l in enumerate(lines) if i > gecko and l.startswith(SECTION))
@@ -66,7 +66,7 @@ def recording_codes(ini):
             continue
         if m.group(3):
             label = m.group(3).strip()
-            keep = not any(s in label for s in SKIP)
+            keep = not any(s in label for s in SKIP + tuple(skip))
         if keep:
             out.append((int(m.group(1), 16), int(m.group(2), 16)))
     return out
@@ -90,9 +90,13 @@ def gc_fst():
 
 
 def main():
-    if len(sys.argv) < 3:
+    args, skip = sys.argv[1:], []
+    while args[:1] == ["--skip"] and len(args) > 1:
+        skip.append(args[1])
+        args = args[2:]
+    if len(args) < 2:
         sys.exit(__doc__)
-    iso, out, sysdir = sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else DEFAULT_SYS
+    iso, out, sysdir = args[0], args[1], args[2] if len(args) > 2 else DEFAULT_SYS
     tmp = tempfile.mkdtemp()
     gct = os.path.join(tmp, "codes.gct")
     subprocess.run([gc_fst(), "read", iso, "codes.gct", gct], check=True)
@@ -103,7 +107,7 @@ def main():
     boot = [c for c in codes(words_of(open(os.path.join(sysdir, "bootloader.gct"), "rb").read()[8:]))
             if c[0] in BOOTLOADER_FUNCTIONS]
     assert len(boot) == len(BOOTLOADER_FUNCTIONS), "bootloader.gct lacks EXITransferBuffer or ProcessGecko"
-    rec = [c for c in codes(recording_codes(os.path.join(sysdir, "GameSettings", "GALE01r2.ini"))) if c[0] != SHOULD_RECORD]
+    rec = [c for c in codes(recording_codes(os.path.join(sysdir, "GameSettings", "GALE01r2.ini"), skip)) if c[0] != SHOULD_RECORD]
     added = boot + rec + codes(always_record()) + codes(empty_list())
 
     # TM-CE's player block (0x2530) fits in Slippi's (0x2600); Slippi's own field is at 0x25FF, past TM-CE's
