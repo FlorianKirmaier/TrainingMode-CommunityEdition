@@ -10,6 +10,14 @@ static GXColor text_gold = {255, 211, 0, 255};
 
 static EventDesc *event_desc;
 
+// AI-written (Claude): a recording named TMREC_AUTO_… that is at most AUTOLOAD_SECONDS old loads as soon as the Lab CSS
+// opens, so a tool that writes one and starts Dolphin needs no menus
+#define AUTOLOAD_PREFIX "TMREC_AUTO_"
+#define AUTOLOAD_SECONDS 120
+#define AUTOLOAD_DELAY_FRAMES 2
+static int autoload_frames;
+static ExportHeader autoload_header;
+
 ExportHeader *GetExportHeaderFromCard(int slot, char *fileName, void *buffer);
 int CSS_ID(int ext_id);
 int GetSelectedFighterIdOnCssForHmn();
@@ -22,6 +30,8 @@ int Menu_SelFile_LoadPage(GOBJ *menu_gobj, int page);
 void Menu_SelCard_Init(GOBJ *menu_gobj);
 void Menu_SelCard_Exit(GOBJ *menu_gobj);
 void Menu_SelCard_Think(GOBJ *menu_gobj);
+void Import_Start(ExportHeader *header, int slot, int file_no);
+void Autoload_Think(GOBJ *gobj);
 
 // OnLoad
 void OnCSSLoad(HSD_Archive *archive)
@@ -63,6 +73,9 @@ void OnCSSLoad(HSD_Archive *archive)
 
     Cam_Button_Create();
     Hazards_Button_Create();
+
+    autoload_frames = 0;
+    GObj_AddProc(GObj_Create(4, 5, 0), Autoload_Think, 1);
 }
 
 void Read_Recordings()
@@ -132,6 +145,72 @@ void Read_Recordings()
 
             CARDUnmount(slot);
             stc_memcard_work->is_done = 0;
+        }
+    }
+}
+
+// Finds the newest fresh TMREC_AUTO_ recording on a card; its header is copied to autoload_header.
+static int Autoload_Find(int slot)
+{
+    s32 memSize, sectorSize;
+    int file_no = -1;
+    if (CARDProbeEx(slot, &memSize, &sectorSize) != CARD_RESULT_READY)
+        return -1;
+    stc_memcard_work->is_done = 0;
+    if (CARDMountAsync(slot, stc_memcard_work->work_area, 0, Memcard_RemovedCallback) != CARD_RESULT_READY)
+        return -1;
+    Memcard_Wait();
+
+    u32 ticks_per_second = os_info->bus_clock / 4;
+    u64 now = OSGetTime();
+    u32 newest = 0;
+    CARDStat card_stat;
+    char name[CARD_FILENAME_MAX];
+    for (int i = 0; i < CARD_MAX_FILE; i++)
+    {
+        if (CARDGetStatus(slot, i, &card_stat) != CARD_RESULT_READY)
+            continue;
+        if (strncmp(os_info->company, (char *)card_stat.company, sizeof(os_info->company)) != 0 ||
+                strncmp(os_info->gameName, (char *)card_stat.gameName, sizeof(os_info->gameName)) != 0 ||
+                strncmp(AUTOLOAD_PREFIX, card_stat.fileName, sizeof(AUTOLOAD_PREFIX) - 1) != 0)
+            continue;
+        u64 written = (u64)card_stat.time * ticks_per_second;
+        if (written > now || now - written > (u64)AUTOLOAD_SECONDS * ticks_per_second || card_stat.time < newest)
+            continue;
+        newest = card_stat.time;
+        file_no = i;
+        memcpy(name, card_stat.fileName, sizeof(name));
+    }
+
+    if (file_no != -1)
+    {
+        void *buffer = calloc(CARD_READ_SIZE);
+        ExportHeader *header = GetExportHeaderFromCard(slot, name, buffer);
+        if (header)
+            memcpy(&autoload_header, header, sizeof(autoload_header));
+        else
+            file_no = -1;
+        HSD_Free(buffer);
+    }
+
+    CARDUnmount(slot);
+    stc_memcard_work->is_done = 0;
+    return file_no;
+}
+
+void Autoload_Think(GOBJ *gobj)
+{
+    if (++autoload_frames < AUTOLOAD_DELAY_FRAMES)
+        return;
+    GObj_Destroy(gobj);
+    for (int slot = 0; slot < 2; slot++)
+    {
+        int file_no = Autoload_Find(slot);
+        if (file_no != -1)
+        {
+            Import_Start(&autoload_header, slot, file_no);
+            SFX_PlayCommon(1);
+            return;
         }
     }
 }
@@ -1064,48 +1143,8 @@ void Menu_Confirm_Think(GOBJ *menu_gobj)
         }
         else if (down & HSD_BUTTON_A)
         {
-            // get variables and junk
-            VSMinorData *css_minorscene = *stc_css_minorscene;
             int this_file_index = (import_data.page * IMPORT_FILESPERPAGE) + import_data.cursor;
-            ExportHeader *header = &import_data.header[import_data.cursor];
-            Preload *preload = Preload_GetTable();
-
-            // get match data
-            u8 hmn_kind = header->metadata.hmn;
-            u8 hmn_costume = header->metadata.hmn_costume;
-            u8 cpu_kind = header->metadata.cpu;
-            u8 cpu_costume = header->metadata.cpu_costume;
-            u16 stage_kind = header->metadata.stage_external;
-
-            // set fighters
-            css_minorscene->vs_data.match_init.playerData[0].c_kind = hmn_kind;
-            css_minorscene->vs_data.match_init.playerData[0].costume = hmn_costume;
-            preload->queued.fighters[0].kind = hmn_kind;
-            preload->queued.fighters[0].costume = hmn_costume;
-            css_minorscene->vs_data.match_init.playerData[1].c_kind = cpu_kind;
-            css_minorscene->vs_data.match_init.playerData[1].costume = cpu_costume;
-            preload->queued.fighters[1].kind = cpu_kind;
-            preload->queued.fighters[1].costume = cpu_costume;
-
-            // set stage
-            css_minorscene->vs_data.match_init.stage = stage_kind;
-            preload->queued.stage = stage_kind;
-
-            // load files
-            Preload_Update();
-
-            // advance scene
-            *stc_css_exitkind = 1;
-
-            // HUGE HACK ALERT
-            event_desc->stage = stage_kind;
-            *onload_fileno = import_data.file_info[this_file_index].file_no;
-            *onload_slot = import_data.memcard_slot;
-            
-            // prevent sheik/zelda transformation
-            for (int i = 0; i < 4; ++i)
-                stc_css_pad[i].held &= ~PAD_BUTTON_A;
-
+            Import_Start(&import_data.header[import_data.cursor], import_data.memcard_slot, import_data.file_info[this_file_index].file_no);
             SFX_PlayCommon(1);
         }
 
@@ -1234,6 +1273,50 @@ void Menu_Confirm_Think(GOBJ *menu_gobj)
     }
     }
 }
+// Sets up the match from the recording's header and leaves the CSS; the Lab loads the file when it starts.
+void Import_Start(ExportHeader *header, int slot, int file_no)
+{
+    // get variables and junk
+    VSMinorData *css_minorscene = *stc_css_minorscene;
+    Preload *preload = Preload_GetTable();
+
+    // get match data
+    u8 hmn_kind = header->metadata.hmn;
+    u8 hmn_costume = header->metadata.hmn_costume;
+    u8 cpu_kind = header->metadata.cpu;
+    u8 cpu_costume = header->metadata.cpu_costume;
+    u16 stage_kind = header->metadata.stage_external;
+
+    // set fighters
+    css_minorscene->vs_data.match_init.playerData[0].c_kind = hmn_kind;
+    css_minorscene->vs_data.match_init.playerData[0].costume = hmn_costume;
+    preload->queued.fighters[0].kind = hmn_kind;
+    preload->queued.fighters[0].costume = hmn_costume;
+    css_minorscene->vs_data.match_init.playerData[1].c_kind = cpu_kind;
+    css_minorscene->vs_data.match_init.playerData[1].costume = cpu_costume;
+    preload->queued.fighters[1].kind = cpu_kind;
+    preload->queued.fighters[1].costume = cpu_costume;
+
+    // set stage
+    css_minorscene->vs_data.match_init.stage = stage_kind;
+    preload->queued.stage = stage_kind;
+
+    // load files
+    Preload_Update();
+
+    // advance scene
+    *stc_css_exitkind = 1;
+
+    // HUGE HACK ALERT
+    event_desc->stage = stage_kind;
+    *onload_fileno = file_no;
+    *onload_slot = slot;
+    
+    // prevent sheik/zelda transformation
+    for (int i = 0; i < 4; ++i)
+        stc_css_pad[i].held &= ~PAD_BUTTON_A;
+}
+
 void Menu_Confirm_Exit(GOBJ *menu_gobj)
 {
     // destroy option text
