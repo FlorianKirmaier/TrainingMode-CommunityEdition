@@ -187,7 +187,8 @@ static int Autoload_Find(int slot)
     return file_no;
 }
 
-// Goes through the import menu as a player would: open it, pick the card, select the file, confirm.
+// Goes through the import menu as a player would: open it, pick the card and select the file; the player confirms
+// (confirming here too, AUTOLOAD_CONFIRM, loads the wrong CPU or crashes the Lab, not understood yet).
 void Autoload_Think(GOBJ *gobj)
 {
     if (autoload_frames++ == 0)
@@ -233,6 +234,7 @@ void Autoload_Think(GOBJ *gobj)
         }
         GObj_Destroy(gobj); // not in the list: leave the menu to the player
     }
+#ifdef AUTOLOAD_CONFIRM
     else if (autoload_frames >= AUTOLOAD_DELAY_FRAMES * 2 && import_data.menu_state == IMP_SELFILE && !import_data.snap.load_inprogress)
     {
         Menu_Confirm_Init(menu, CFRM_LOAD);
@@ -240,6 +242,7 @@ void Autoload_Think(GOBJ *gobj)
         Import_Start(&import_data.header[import_data.cursor], import_data.memcard_slot, autoload_file_no);
         SFX_PlayCommon(1);
     }
+#endif
 }
 
 // Button Functions
