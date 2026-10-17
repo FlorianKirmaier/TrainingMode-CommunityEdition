@@ -1467,41 +1467,31 @@ void OnFileLoad(HSD_Archive *archive) // this function is run right after TmDt i
 #define MAIN_MENU_MINOR 0
 #define LAB_PAGE 1
 #define LAB_EVENT 0
-#define AUTOLOAD_ESS_TRIES 5
-#define COMBINED_PAD_DOWN ((u32 *)(0x80479cf0 + 0xC))
 static int autoload_ess_done;
 
 #define MEMCARD_BUSY 11
 #define AUTOLOAD_ESS_GIVE_UP_FRAMES 180
+#define EVENT_MAJOR 0x2B
 
-// Waits until the game is done with the memory card, looks for a fresh recording and then presses A on the Lab.
+// Waits until the game is done with the memory card, looks for a fresh recording and then leaves the main menu for
+// the event the event select is on (the Lab), as choosing it there does.
 static void Autoload_EssThink(GOBJ *gobj)
 {
     int *frames = gobj->userdata;
-    int frame = ++frames[0];
+    int frame = ++*frames;
     if (frame < AUTOLOAD_ESS_DELAY_FRAMES)
         return;
-    if (frames[1] == 0)
-    {
-        int status = Memcard_CheckStatus();
-        if (status == MEMCARD_BUSY && frame < AUTOLOAD_ESS_GIVE_UP_FRAMES)
-            return;
-        OSReport("autoload: ESS frame %d, memcard status %d\n", frame, status);
-        if (status == MEMCARD_BUSY || (Autoload_Find(0) == -1 && Autoload_Find(1) == -1))
-        {
-            GObj_Destroy(gobj);
-            return;
-        }
-        frames[1] = frame;
+    int status = Memcard_CheckStatus();
+    if (status == MEMCARD_BUSY && frame < AUTOLOAD_ESS_GIVE_UP_FRAMES)
         return;
-    }
-    if (frame > frames[1] + AUTOLOAD_ESS_TRIES)
-    {
-        GObj_Destroy(gobj);
+    GObj_Destroy(gobj);
+    OSReport("autoload: main menu frame %d, memcard status %d\n", frame, status);
+    if (status == MEMCARD_BUSY || (Autoload_Find(0) == -1 && Autoload_Find(1) == -1))
         return;
-    }
-    OSReport("autoload: ESS press A, page %d event %d\n", stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
-    *COMBINED_PAD_DOWN |= HSD_BUTTON_A;
+    OSReport("autoload: starting the event, page %d event %d\n", stc_memcard->TM_EventPage, stc_memcard->EventBackup.event);
+    Scene_SetNextMajor(EVENT_MAJOR);
+    Scene_ExitMajor();
+    Scene_ExitMinor();
 }
 
 static void Autoload_OnSceneChange(void)
@@ -1518,7 +1508,7 @@ static void Autoload_OnSceneChange(void)
         return;
     }
     GOBJ *gobj = GObj_Create(0, 0, 0);
-    int *frames = calloc(2 * sizeof(int)); // frames in the ESS, frame the recording was found
+    int *frames = calloc(sizeof(int));
     GObj_AddUserData(gobj, 4, HSD_Free, frames);
     GObj_AddProc(gobj, Autoload_EssThink, 0);
 }
