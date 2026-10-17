@@ -14,8 +14,10 @@ static EventDesc *event_desc;
 // opens, so a tool that writes one and starts Dolphin needs no menus
 #define AUTOLOAD_PREFIX "TMREC_AUTO_"
 #define AUTOLOAD_SECONDS 120
-#define AUTOLOAD_DELAY_FRAMES 2
+#define AUTOLOAD_DELAY_FRAMES 30
 static int autoload_frames;
+static int autoload_slot;
+static int autoload_file_no;
 static ExportHeader autoload_header;
 
 ExportHeader *GetExportHeaderFromCard(int slot, char *fileName, void *buffer);
@@ -75,6 +77,7 @@ void OnCSSLoad(HSD_Archive *archive)
     Hazards_Button_Create();
 
     autoload_frames = 0;
+    autoload_file_no = -1;
     GObj_AddProc(GObj_Create(4, 5, 0), Autoload_Think, 1);
 }
 
@@ -200,18 +203,27 @@ static int Autoload_Find(int slot)
 
 void Autoload_Think(GOBJ *gobj)
 {
-    if (++autoload_frames < AUTOLOAD_DELAY_FRAMES)
-        return;
-    GObj_Destroy(gobj);
-    for (int slot = 0; slot < 2; slot++)
+    // first frame: look for a recording; while one is pending the CSS is held, as the import menu holds it
+    if (autoload_frames++ == 0)
     {
-        int file_no = Autoload_Find(slot);
-        if (file_no != -1)
+        for (int slot = 0; slot < 2 && autoload_file_no == -1; slot++)
         {
-            Import_Start(&autoload_header, slot, file_no);
-            SFX_PlayCommon(1);
+            autoload_file_no = Autoload_Find(slot);
+            autoload_slot = slot;
+        }
+        if (autoload_file_no == -1)
+        {
+            GObj_Destroy(gobj);
             return;
         }
+    }
+    *stc_css_delay = 2;
+    if (autoload_frames < AUTOLOAD_DELAY_FRAMES)
+        *stc_css_exitkind = 5;
+    else if (autoload_frames == AUTOLOAD_DELAY_FRAMES)
+    {
+        Import_Start(&autoload_header, autoload_slot, autoload_file_no);
+        SFX_PlayCommon(1);
     }
 }
 
