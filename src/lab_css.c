@@ -13,9 +13,11 @@ static EventDesc *event_desc;
 
 // AI-written (Claude): auto-load, see autoload.h
 #define AUTOLOAD_DELAY_FRAMES 30
+#define AUTOLOAD_APPLY_FRAMES 5
 static int autoload_frames;
 static int autoload_slot;
 static int autoload_file_no;
+static int autoload_confirmed;
 
 ExportHeader *GetExportHeaderFromCard(int slot, char *fileName, void *buffer);
 int CSS_ID(int ext_id);
@@ -75,6 +77,7 @@ void OnCSSLoad(HSD_Archive *archive)
 
     autoload_frames = 0;
     autoload_file_no = -1;
+    autoload_confirmed = 0;
     GObj_AddProc(GObj_Create(4, 5, 0), Autoload_Think, 1);
 }
 
@@ -149,8 +152,7 @@ void Read_Recordings()
     }
 }
 
-// Goes through the import menu as a player would: open it, pick the card and select the file; the player confirms
-// (confirming here too, AUTOLOAD_CONFIRM, loads the wrong CPU or crashes the Lab, not understood yet).
+// Goes through the import menu as a player would: open it, pick the card, select the file, confirm.
 void Autoload_Think(GOBJ *gobj)
 {
     if (autoload_frames++ == 0)
@@ -207,15 +209,16 @@ void Autoload_Think(GOBJ *gobj)
         }
         GObj_Destroy(gobj); // not in the list: leave the menu to the player
     }
-#ifdef AUTOLOAD_CONFIRM
     else if (autoload_frames >= AUTOLOAD_DELAY_FRAMES * 2 && import_data.menu_state == IMP_SELFILE && !import_data.snap.load_inprogress)
     {
         Menu_Confirm_Init(menu, CFRM_LOAD);
-        GObj_Destroy(gobj);
-        Import_Start(&import_data.header[import_data.cursor], import_data.memcard_slot, autoload_file_no);
+        autoload_confirmed = 1;
         SFX_PlayCommon(1);
     }
-#endif
+    // the CSS writes its own (empty) fighter choices once more after leaving, so the import is applied until the
+    // scene ends; a player confirming by hand gets the same through the A press counting twice
+    if (autoload_confirmed && autoload_confirmed++ <= AUTOLOAD_APPLY_FRAMES)
+        Import_Start(&import_data.header[import_data.cursor], import_data.memcard_slot, autoload_file_no);
 }
 
 // Button Functions
